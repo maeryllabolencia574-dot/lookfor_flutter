@@ -1,16 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class ApiService {
-  static String get baseUrl {
-    if (Platform.isIOS) {
-      return 'http://127.0.0.1:8000';
-    } else if (Platform.isAndroid) {
-      return 'http://10.0.2.2:8000';
-    }
-    return 'http://127.0.0.1:8000';
-  }
+  static const String baseUrl = 'https://lookfor-app-aafd5427.azurewebsites.net';
+  
 
   String? _accessToken;
   bool? _isAdmin;
@@ -102,10 +97,10 @@ class ApiService {
     }
   }
 
-  Future<void> changePassword(
-    String currentPassword,
-    String newPassword,
-  ) async {
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/change-password'),
       headers: _authHeaders(),
@@ -195,6 +190,7 @@ class ApiService {
   Future<Map<String, dynamic>> reportFoundItem({
     required String itemName,
     required String category,
+    int? categoryId,
     required String brand,
     required String color,
     required String location,
@@ -213,6 +209,9 @@ class ApiService {
     request.headers['Authorization'] = 'Bearer $_accessToken';
     request.fields['item_name'] = itemName;
     request.fields['category'] = category;
+    if (categoryId != null) {
+      request.fields['category_id'] = categoryId.toString();
+    }
     request.fields['brand'] = brand;
     request.fields['color'] = color;
     request.fields['location'] = location;
@@ -220,9 +219,7 @@ class ApiService {
     request.fields['time_found'] = timeFound;
     request.fields['description'] = description;
 
-    request.files.add(
-      await http.MultipartFile.fromPath('main_image', mainImage.path),
-    );
+    request.files.add(await _buildImagePart('image', mainImage));
 
     if (referenceImage1 != null) {
       request.files.add(
@@ -245,16 +242,24 @@ class ApiService {
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
 
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);
     } else {
-      throw ApiException('Failed to report found item');
+      dynamic error;
+      try {
+        error = json.decode(response.body);
+      } catch (_) {}
+      throw ApiException(
+        _extractErrorMessage(error) ??
+            'Failed to report found item (${response.statusCode})',
+      );
     }
   }
 
   Future<Map<String, dynamic>> reportLostItem({
     required String itemName,
     required String category,
+    int? categoryId,
     required String brand,
     required String color,
     required String location,
@@ -272,15 +277,16 @@ class ApiService {
     request.headers['Authorization'] = 'Bearer $_accessToken';
     request.fields['item_name'] = itemName;
     request.fields['category'] = category;
+    if (categoryId != null) {
+      request.fields['category_id'] = categoryId.toString();
+    }
     request.fields['brand'] = brand;
     request.fields['color'] = color;
     request.fields['location'] = location;
     request.fields['date'] = date;
     request.fields['description'] = description;
 
-    request.files.add(
-      await http.MultipartFile.fromPath('main_image', mainImage.path),
-    );
+    request.files.add(await _buildImagePart('image', mainImage));
 
     if (referenceImage1 != null) {
       request.files.add(
@@ -303,10 +309,17 @@ class ApiService {
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
 
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);
     } else {
-      throw ApiException('Failed to report lost item');
+      dynamic error;
+      try {
+        error = json.decode(response.body);
+      } catch (_) {}
+      throw ApiException(
+        _extractErrorMessage(error) ??
+            'Failed to report lost item (${response.statusCode})',
+      );
     }
   }
 
@@ -386,14 +399,24 @@ class ApiService {
     }
   }
 
-  Future<void> markNotificationAsRead(int notificationId) async {
+  Future<void> markNotificationAsRead(int notif_id) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/student/notifications/$notificationId/read'),
+      Uri.parse('$baseUrl/student/notifications/$notif_id/read'),
       headers: _authHeaders(),
     );
 
     if (response.statusCode != 200) {
       throw ApiException('Failed to mark notification as read');
+    }
+  }
+  Future<void> markAllNotificationsAsRead() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/student/notifications/mark-all-read'),
+      headers: _authHeaders(),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to mark all notifications as read');
     }
   }
 
@@ -467,6 +490,57 @@ class ApiService {
         ? relativePath.substring(1)
         : relativePath;
     return '$baseUrl/$path';
+  }
+
+  Future<http.MultipartFile> _buildImagePart(String fieldName, File file) async {
+    final extension = file.path.split('.').last.toLowerCase();
+    final mediaType = switch (extension) {
+      'jpg' || 'jpeg' => MediaType('image', 'jpeg'),
+      'png' => MediaType('image', 'png'),
+      'webp' => MediaType('image', 'webp'),
+      _ => throw ApiException(
+          'Unsupported image type ".$extension". Please upload JPG, JPEG, PNG, or WEBP.',
+        ),
+    };
+
+    return http.MultipartFile.fromPath(
+      fieldName,
+      file.path,
+      contentType: mediaType,
+    );
+  }
+
+  String? _extractErrorMessage(dynamic error) {
+    if (error is Map<String, dynamic>) {
+      final detail = error['detail'];
+      if (detail is String && detail.isNotEmpty) return detail;
+      if (detail is List && detail.isNotEmpty) {
+        return detail
+            .map((entry) {
+              if (entry is Map<String, dynamic>) {
+                final location = entry['loc'];
+                final message = entry['msg'];
+                final images = entry['images'];
+                if (images is List && images.isNotEmpty) {
+                  return 'Image upload error: ${images.join(', ')}';
+                }
+                if (message is String) {
+                  if (location is List && location.isNotEmpty) {
+                    return '${location.join('.')} $message';
+                  }
+                  return message;
+                }
+              }
+              return entry.toString();
+            })
+            .join('\n');
+      }
+
+      final message = error['message'];
+      if (message is String && message.isNotEmpty) return message;
+    }
+
+    return null;
   }
 }
 

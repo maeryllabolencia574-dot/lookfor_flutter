@@ -5,10 +5,7 @@ import 'package:image_picker/image_picker.dart';
 class ChangeProfilePictureScreen extends StatefulWidget {
   final String? currentImageUrl;
 
-  const ChangeProfilePictureScreen({
-    super.key,
-    this.currentImageUrl,
-  });
+  const ChangeProfilePictureScreen({super.key, this.currentImageUrl});
 
   @override
   State<ChangeProfilePictureScreen> createState() =>
@@ -18,6 +15,7 @@ class ChangeProfilePictureScreen extends StatefulWidget {
 class _ChangeProfilePictureScreenState
     extends State<ChangeProfilePictureScreen> {
   File? _selectedImage;
+  bool _showDefaultPreview = false;
 
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
@@ -26,23 +24,22 @@ class _ChangeProfilePictureScreenState
     if (picked != null) {
       setState(() {
         _selectedImage = File(picked.path);
+        _showDefaultPreview = false;
       });
     }
+  }
+
+  void _removeSelectedImage() {
+    setState(() {
+      _selectedImage = null;
+      _showDefaultPreview = true;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          "Change Profile Picture",
-          style: TextStyle(color: Color(0xFF0066CC)),
-        ),
-        backgroundColor: Colors.white,
-        iconTheme: const IconThemeData(color: Color(0xFF0066CC)),
-        elevation: 1,
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text("Change Profile Picture")),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -55,18 +52,32 @@ class _ChangeProfilePictureScreenState
               backgroundColor: const Color(0xFF005BAB),
               backgroundImage: _selectedImage != null
                   ? FileImage(_selectedImage!)
-                  : widget.currentImageUrl != null
-                      ? NetworkImage(widget.currentImageUrl!)
-                          as ImageProvider
-                      : null,
-              child: _selectedImage == null &&
-                      widget.currentImageUrl == null
-                  ? const Icon(Icons.person,
-                      size: 70, color: Colors.white)
+                  : !_showDefaultPreview && widget.currentImageUrl != null
+                  ? NetworkImage(widget.currentImageUrl!) as ImageProvider
+                  : null,
+              child:
+                  _selectedImage == null &&
+                      (_showDefaultPreview || widget.currentImageUrl == null)
+                  ? const Icon(Icons.person, size: 70, color: Colors.white)
                   : null,
             ),
 
-            const SizedBox(height: 30),
+            const SizedBox(height: 12),
+            Text(
+              _selectedImage != null
+                  ? "New photo selected"
+                  : _showDefaultPreview
+                  ? "Default avatar preview"
+                  : widget.currentImageUrl != null
+                  ? "Current profile photo"
+                  : "Default avatar",
+              style: const TextStyle(
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+
+            const SizedBox(height: 26),
 
             // PICK BUTTONS
             SizedBox(
@@ -75,10 +86,10 @@ class _ChangeProfilePictureScreenState
                 icon: const Icon(Icons.photo_library),
                 label: const Text("Select from Gallery"),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0066CC),
+                  backgroundColor: const Color(0xFF005BAB),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -94,16 +105,27 @@ class _ChangeProfilePictureScreenState
                 icon: const Icon(Icons.camera_alt),
                 label: const Text("Take a Photo"),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF0066CC),
-                  side: const BorderSide(color: Color(0xFF0066CC)),
+                  foregroundColor: const Color(0xFF005BAB),
+                  side: const BorderSide(color: Color(0xFFB7C7DA)),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onPressed: () => _pickImage(ImageSource.camera),
               ),
             ),
+            if (_selectedImage != null) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text("Remove selected photo"),
+                  onPressed: _removeSelectedImage,
+                ),
+              ),
+            ],
 
             const Spacer(),
 
@@ -129,9 +151,7 @@ class _ChangeProfilePictureScreenState
                     onPressed: _selectedImage == null
                         ? null
                         : () {
-                            Navigator.pop(context, {
-                              "image": _selectedImage,
-                            });
+                            Navigator.pop(context, {"image": _selectedImage});
                           },
                     child: const Text("Save"),
                   ),

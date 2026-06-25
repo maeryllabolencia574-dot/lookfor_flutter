@@ -78,5 +78,6 @@ static Future<String?> uploadPreviewImage(List<File> images) async {
     // ✅ Upload only the FIRST image
     return await uploadImage(images.first);
   }
+  
 
 }

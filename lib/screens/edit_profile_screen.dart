@@ -7,7 +7,7 @@ class EditProfileScreen extends StatefulWidget {
   final String studentId;
   final String email;
   final String course;
-  final String section;
+  //final String section;
   final String phone;
   final String? profileImage;
 
@@ -17,7 +17,7 @@ class EditProfileScreen extends StatefulWidget {
     required this.studentId,
     required this.email,
     required this.course,
-    required this.section,
+    //required this.section,
     required this.phone,
     this.profileImage,
   });
@@ -48,8 +48,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   // ---------------- PICK IMAGE ----------------
   Future<void> _pickImage() async {
-    final picked =
-        await ImagePicker().pickImage(source: ImageSource.gallery);
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
 
     if (picked != null) {
       setState(() {
@@ -98,8 +97,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Discard Changes"),
-        content:
-            const Text("You have unsaved changes. Discard them?"),
+        content: const Text("You have unsaved changes. Discard them?"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -120,12 +118,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return discard ?? false;
   }
 
-  
   @override
-  
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldPop = await _onWillPop();
+        if (shouldPop && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
       child: Scaffold(
         appBar: AppBar(title: const Text("Edit Profile")),
         body: SingleChildScrollView(
@@ -144,27 +147,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       backgroundImage: _newImage != null
                           ? FileImage(_newImage!)
                           : widget.profileImage != null
-                              ? NetworkImage(widget.profileImage!)
-                                  as ImageProvider
-                              : null,
-                      child: _newImage == null &&
-                              widget.profileImage == null
-                          ? const Icon(Icons.person,
-                              size: 50, color: Colors.white)
+                          ? NetworkImage(widget.profileImage!) as ImageProvider
+                          : null,
+                      child: _newImage == null && widget.profileImage == null
+                          ? const Icon(
+                              Icons.person,
+                              size: 50,
+                              color: Colors.white,
+                            )
                           : null,
                     ),
                     const CircleAvatar(
                       radius: 18,
                       backgroundColor: Colors.white,
-                      child: Icon(Icons.camera_alt,
-                          size: 18, color: Color(0xFF005BAB)),
+                      child: Icon(
+                        Icons.camera_alt,
+                        size: 18,
+                        color: Color(0xFF005BAB),
+                      ),
                     ),
                   ],
                 ),
               ),
 
               const SizedBox(height: 20),
-              
 
               // ---------------- INFO CARD ----------------
               _infoCard([
@@ -173,7 +179,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 _infoRow("Email", widget.email),
                 _editablePhone(),
                 _infoRow("Course", widget.course),
-                _infoRow("Section", widget.section),
+                //_infoRow("Section", widget.section),
               ]),
 
               const SizedBox(height: 30),
@@ -213,7 +219,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       child: Column(children: children),
     );
   }
-  
 
   Widget _infoRow(String label, String value) {
     return Padding(
@@ -222,20 +227,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         children: [
           Expanded(
             flex: 4,
-            child:
-                Text(label, style: const TextStyle(color: Colors.grey)),
+            child: Text(label, style: const TextStyle(color: Colors.grey)),
           ),
           Expanded(
             flex: 6,
-            child: Text(value,
-                style:
-                    const TextStyle(fontWeight: FontWeight.w500)),
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
           ),
         ],
       ),
     );
   }
-  
 
   Widget _editablePhone() {
     return Padding(

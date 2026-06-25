@@ -1015,8 +1015,11 @@ class ApiService {
   Future<Map<String, dynamic>> reportFoundItem({
     required String itemName,
     required String category,
+    required String brand,
+    required String color,
     required String location,
     required String date,
+    required String timeFound,
     required String imagePath,
   }) async {
     var request = http.MultipartRequest(
@@ -1027,8 +1030,12 @@ class ApiService {
     request.headers['Authorization'] = 'Bearer $_accessToken';
     request.fields['item_name'] = itemName;
     request.fields['category'] = category;
+    request.fields['brand'] = brand;
+    request.fields['color'] = color;
     request.fields['location'] = location;
     request.fields['date'] = date;
+    request.fields['time_found'] = timeFound;
+    request.fields['description'] = description
     request.files.add(
       await http.MultipartFile.fromPath('main_image', imagePath),
     );
