@@ -1,15 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../screens/about_screen.dart';
 import '../screens/dashboard_screen.dart';
 import '../screens/inventory_screen.dart';
 import '../screens/messages_screen.dart';
 import '../screens/profile_screen.dart';
+import '../widgets/logout_dialog.dart';
 
 class AppDrawer extends StatelessWidget {
   final String currentPage;
+  final String userName;
+  final String userRole;
 
-  const AppDrawer({super.key, this.currentPage = ""});
+  const AppDrawer({
+    super.key,
+    this.currentPage = "",
+    this.userName = "Current User",
+    this.userRole = "Student",
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -116,11 +125,46 @@ class AppDrawer extends StatelessWidget {
               );
             },
           ),
+
+          const Divider(color: Colors.white38, indent: 16, endIndent: 16),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              'More',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+
+          _drawerItem(
+            icon: Icons.info_outline,
+            title: "About",
+            isSelected: currentPage == "About",
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AboutScreen()),
+              );
+            },
+          ),
+
+          _drawerItem(
+            icon: Icons.logout_outlined,
+            title: "Logout",
+            isSelected: false,
+            onTap: () {
+              Navigator.pop(context);
+              showLogoutDialog(context, {
+                "name": userName,
+                "role": userRole,
+              });
+            },
+          ),
         ],
       ),
     );
   }
-
+  
   Widget _drawerItem({
     required IconData icon,
     required String title,

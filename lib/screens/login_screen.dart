@@ -15,6 +15,12 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController password = TextEditingController();
   bool obscurePassword = true;
   bool isLoading = false;
+
+  static final RegExp _uppercasePattern = RegExp(r'[A-Z]');
+  static final RegExp _lowercasePattern = RegExp(r'[a-z]');
+  static final RegExp _numberPattern = RegExp(r'[0-9]');
+  static final RegExp _specialPattern = RegExp(r'[^A-Za-z0-9]');
+
   @override
   void dispose() {
     email.dispose();
@@ -69,13 +75,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      // Login successful
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
-        );
-      }
+      await _continueAfterAuthenticated(currentPassword: password.text);
     } catch (e) {
       setState(() => isLoading = false);
       if (mounted) {
@@ -84,6 +84,261 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     }
+  }
+
+  Future<void> _continueAfterAuthenticated({
+    required String currentPassword,
+  }) async {
+    try {
+      final user = await apiClient.getCurrentUser();
+      final mustChangePassword = _truthy(user['must_change_password']);
+
+      if (!mounted) return;
+      setState(() => isLoading = false);
+
+      if (mustChangePassword) {
+        final changed = await _showDefaultPasswordChangeDialog(
+          currentPassword: currentPassword,
+        );
+        if (!changed || !mounted) return;
+      }
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const DashboardScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Unable to verify password status: ${e.toString()}"),
+        ),
+      );
+    }
+  }
+
+  bool _truthy(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    final text = value?.toString().trim().toLowerCase();
+    return text == 'true' || text == '1' || text == 'yes';
+  }
+
+  bool _isStrongPassword(String value, String currentPassword) {
+    return value.length >= 8 &&
+        _uppercasePattern.hasMatch(value) &&
+        _lowercasePattern.hasMatch(value) &&
+        _numberPattern.hasMatch(value) &&
+        _specialPattern.hasMatch(value) &&
+        value != currentPassword;
+  }
+
+  Future<bool> _showDefaultPasswordChangeDialog({
+    required String currentPassword,
+  }) async {
+    final newPassword = TextEditingController();
+    final confirmPassword = TextEditingController();
+    bool obscureNewPassword = true;
+    bool obscureConfirmPassword = true;
+    bool isUpdating = false;
+
+    final changed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: StatefulBuilder(
+          builder: (context, setDialogState) {
+            final passwordText = newPassword.text;
+            final confirmText = confirmPassword.text;
+            final canSubmit =
+                _isStrongPassword(passwordText, currentPassword) &&
+                confirmText == passwordText;
+
+            void refreshRequirements(String _) {
+              setDialogState(() {});
+            }
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              title: const Text(
+                "Change Default Password",
+                style: TextStyle(
+                  color: Color(0xFF003366),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Your account is still using the default password. Create a new password to continue.",
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: newPassword,
+                      obscureText: obscureNewPassword,
+                      onChanged: refreshRequirements,
+                      decoration: inputDecoration("New Password").copyWith(
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            obscureNewPassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              obscureNewPassword = !obscureNewPassword;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: confirmPassword,
+                      obscureText: obscureConfirmPassword,
+                      onChanged: refreshRequirements,
+                      decoration: inputDecoration("Confirm Password").copyWith(
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            obscureConfirmPassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              obscureConfirmPassword = !obscureConfirmPassword;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _passwordRequirement(
+                      "At least 8 characters",
+                      passwordText.length >= 8,
+                    ),
+                    _passwordRequirement(
+                      "One uppercase letter",
+                      _uppercasePattern.hasMatch(passwordText),
+                    ),
+                    _passwordRequirement(
+                      "One lowercase letter",
+                      _lowercasePattern.hasMatch(passwordText),
+                    ),
+                    _passwordRequirement(
+                      "One number",
+                      _numberPattern.hasMatch(passwordText),
+                    ),
+                    _passwordRequirement(
+                      "One special character",
+                      _specialPattern.hasMatch(passwordText),
+                    ),
+                    _passwordRequirement(
+                      "Different from the default password",
+                      passwordText.isNotEmpty &&
+                          passwordText != currentPassword,
+                    ),
+                    _passwordRequirement(
+                      "Passwords match",
+                      confirmText.isNotEmpty && confirmText == passwordText,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFFE000),
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed: !canSubmit || isUpdating
+                        ? null
+                        : () async {
+                            setDialogState(() => isUpdating = true);
+                            try {
+                              await apiClient.changePassword(
+                                currentPassword: currentPassword,
+                                newPassword: passwordText,
+                              );
+                              if (!dialogContext.mounted) return;
+                              Navigator.pop(dialogContext, true);
+                              if (mounted) {
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      "Password changed successfully.",
+                                    ),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (!dialogContext.mounted) return;
+                              setDialogState(() => isUpdating = false);
+                              if (mounted) {
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      "Failed to change password: ${e.toString()}",
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    child: isUpdating
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text("Update Password"),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+
+    newPassword.dispose();
+    confirmPassword.dispose();
+    return changed ?? false;
+  }
+
+  Widget _passwordRequirement(String label, bool isMet) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Icon(
+            isMet ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 18,
+            color: isMet ? const Color(0xFF198754) : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isMet ? const Color(0xFF198754) : Colors.grey.shade700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // =====================
@@ -178,11 +433,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     await apiClient.verifyMfa(email, code);
                     if (mounted) {
                       Navigator.pop(context);
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const DashboardScreen(),
-                        ),
+                      await _continueAfterAuthenticated(
+                        currentPassword: password.text,
                       );
                     }
                   } catch (e) {

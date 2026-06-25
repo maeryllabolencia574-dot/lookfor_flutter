@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
+import '../widgets/notification_bell_button.dart';
+import '../services/api_client.dart';
+import '../widgets/app_bar_account_menu.dart';
 import '../widgets/app_drawer.dart';
-import 'login_screen.dart';
+import '../services/profile_image_notifier.dart';
 import 'change_profile_picture_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -15,7 +17,20 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   // ---------------- USER DATA ----------------
-  String name = "Maeryll Abolencia";
+  bool isLoading = true;
+  String name = "";
+  String studentId = "";
+  String email = "";
+  String course = "";
+  String section = "";
+  String status = "";
+  String role = "";
+
+  String? profileImageUrl;
+  File? profileImageFile;
+
+  bool emailAuthEnabled = false;
+  /*String name = "Maeryll Abolencia";
   String studentId = "02000362199";
   String email = "abolencia.362199@sti.edu.ph";
   String course = "Information Technology";
@@ -26,26 +41,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? profileImageUrl;
   File? profileImageFile;
 
-  bool emailAuthEnabled = false;
+  bool emailAuthEnabled = false;*/
+  @override
+  void initState() {
+    super.initState();
+    _fetchUserData();
+  }
 
+  Future<void> _fetchUserData() async {
+    try {
+      final userData = await apiClient.getCurrentUser();
+      if (!mounted) return;
+
+      setState(() {
+        name = userData['full_name'] ?? "No Name";
+        studentId = userData['student_no'] ?? "N/A";
+        email = userData['email'] ?? "";
+        course = userData['course'] ?? "";
+        section = userData['section'] ?? "";
+        status = (userData['is_student_active'] ?? false)
+            ? "active"
+            : "inactive";
+        role = userData['role_label'] ?? "Student";
+        emailAuthEnabled = userData['two_factor_enabled'] ?? false;
+        final rawProfilePic = userData['profile_pic']?.toString().trim();
+        profileImageFile = null;
+        final nextProfileImageUrl =
+            rawProfilePic == null ||
+                rawProfilePic.isEmpty ||
+                _isDefaultProfilePath(rawProfilePic)
+            ? null
+            : _withProfileImageVersion(apiClient.getImageUrl(rawProfilePic));
+        profileImageUrl = nextProfileImageUrl;
+        setProfileImageUrl(nextProfileImageUrl);
+        isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
+      _infoDialog("Error loading profile: $e");
+    }
+  }
   // ---------------- NOTIFICATIONS ----------------
-  final List<Map<String, String>> notifications = [
-    {
-      "title": "Item Match Found",
-      "message": "A found item matches your reported lost item.",
-      "time": "2 mins ago",
-    },
-    {
-      "title": "Item Claimed",
-      "message": "Your lost item has been successfully claimed.",
-      "time": "1 hour ago",
-    },
-  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: const AppDrawer(currentPage: "Profile"),
+      drawer: AppDrawer(currentPage: "Profile", userName: name, userRole: role),
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
@@ -71,30 +113,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         actions: [
-          _notificationMenu(),
-          IconButton(
-            icon: const CircleAvatar(
-              radius: 16,
-              backgroundColor: Color(0xFFDDDDDD),
-              child: Icon(Icons.person,
-                  color: Color(0xFF0066CC), size: 20),
-            ),
-            onPressed: () => _showProfileMenu(context),
-          ),
+          const NotificationBellButton(),
+          AppBarAccountMenu(userName: name, userRole: role),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _buildHeaderCard(context),
-            const SizedBox(height: 20),
-            _buildInfoCard(),
-            const SizedBox(height: 20),
-            _buildSecurityCard(),
-          ],
-        ),
-      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _fetchUserData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildHeaderCard(context),
+                    const SizedBox(height: 20),
+                    _buildInfoCard(),
+                    const SizedBox(height: 20),
+                    _buildSecurityCard(),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 
@@ -111,36 +151,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
             backgroundImage: profileImageFile != null
                 ? FileImage(profileImageFile!)
                 : profileImageUrl != null
-                    ? NetworkImage(profileImageUrl!)
-                    : null,
+                ? NetworkImage(profileImageUrl!)
+                : null,
             child: profileImageFile == null && profileImageUrl == null
-                ? const Icon(Icons.person,
-                    size: 60, color: Colors.white)
+                ? const Icon(Icons.person, size: 60, color: Colors.white)
                 : null,
           ),
           const SizedBox(height: 12),
           Text(
             name,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
               color: Color(0xFF0066CC),
             ),
           ),
-          Text(studentId,
-              style: const TextStyle(color: Colors.grey)),
+          Text(studentId, style: const TextStyle(color: Colors.grey)),
           const SizedBox(height: 8),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             decoration: BoxDecoration(
               color: Colors.green,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               status,
-              style:
-                  const TextStyle(color: Colors.white, fontSize: 12),
+              style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
           const SizedBox(height: 16),
@@ -151,7 +188,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 backgroundColor: const Color(0xFF0066CC),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
+                  borderRadius: BorderRadius.circular(30),
+                ),
               ),
               child: const Text("Change Profile Picture"),
               onPressed: () async {
@@ -165,9 +203,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
 
                 if (result != null && result["image"] != null) {
-                  setState(() {
-                    profileImageFile = result["image"];
-                  });
+                  setState(() => isLoading = true);
+                  try {
+                    final selectedImage = result["image"] as File;
+                    await apiClient.updateProfile(
+                      fullName: name,
+                      studentNo: studentId,
+                      course: course,
+                      section: section,
+                      profilePic: selectedImage,
+                    );
+                    await _fetchUserData();
+                    notifyProfileImageChanged();
+                    if (mounted && profileImageUrl == null) {
+                      setState(() => profileImageFile = selectedImage);
+                    }
+                    _infoDialog("Profile picture updated successfully!");
+                  } catch (e) {
+                    _infoDialog("Update failed: $e");
+                  } finally {
+                    if (mounted) {
+                      setState(() => isLoading = false);
+                    }
+                  }
                 }
               },
             ),
@@ -175,6 +233,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
+  }
+
+  String _withProfileImageVersion(String url) {
+    if (url.isEmpty) return url;
+    final separator = url.contains('?') ? '&' : '?';
+    return '$url${separator}v=${profileImageVersion.value}';
+  }
+
+  bool _isDefaultProfilePath(String value) {
+    final normalized = value.toLowerCase();
+    return normalized.contains('default-student-avatar') ||
+        normalized.contains('default-profile') ||
+        normalized.contains('default-avatar');
   }
 
   // ==================================================
@@ -234,28 +305,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
             decoration: _cardDecoration(),
             child: Row(
               children: [
-                const Icon(Icons.email_outlined,
-                    color: Color(0xFF0066CC)),
+                const Icon(Icons.email_outlined, color: Color(0xFF0066CC)),
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Email Authentication",
-                          style:
-                              TextStyle(fontWeight: FontWeight.w600)),
+                      Text(
+                        "Email Authentication",
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       SizedBox(height: 4),
                       Text(
                         "Receive a verification code via email when logging in from a new device",
-                        style:
-                            TextStyle(fontSize: 12, color: Colors.grey),
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],
                   ),
                 ),
                 Switch(
                   value: emailAuthEnabled,
-                  activeColor: const Color(0xFF0066CC),
+                  activeThumbColor: const Color(0xFF0066CC),
                   onChanged: (val) {
                     setState(() => emailAuthEnabled = val);
                   },
@@ -272,13 +342,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             decoration: _cardDecoration(),
             child: Row(
               children: [
-                const Icon(Icons.lock_outline,
-                    color: Color(0xFF0066CC)),
+                const Icon(Icons.lock_outline, color: Color(0xFF0066CC)),
                 const SizedBox(width: 12),
                 const Expanded(
-                  child: Text("Change Password",
-                      style:
-                          TextStyle(fontWeight: FontWeight.w600)),
+                  child: Text(
+                    "Change Password",
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
                 OutlinedButton(
                   onPressed: _showChangePasswordDialog,
@@ -303,18 +373,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (_) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Change Password",
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF0066CC))),
+              const Text(
+                "Change Password",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0066CC),
+                ),
+              ),
               const SizedBox(height: 16),
               _passwordField("Current Password", oldPass),
               _passwordField("New Password", newPass),
@@ -323,32 +395,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Row(
                 children: [
                   Expanded(
-                      child: OutlinedButton(
-                          onPressed: () =>
-                              Navigator.pop(context),
-                          child: const Text("Cancel"))),
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("Cancel"),
+                    ),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              const Color(0xFFFFE000),
-                          foregroundColor: Colors.black),
-                      onPressed: () {
+                        backgroundColor: const Color(0xFFFFE000),
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () async {
                         if (newPass.text != confirmPass.text) {
-                          _infoDialog(
-                              "Passwords do not match.");
+                          _infoDialog("Passwords do not match.");
                           return;
                         }
-                        Navigator.pop(context);
-                        _infoDialog(
-                            "Password changed successfully.");
+                        try {
+                          await apiClient.changePassword(
+                            currentPassword: oldPass.text,
+                            newPassword: newPass.text,
+                          );
+                          if (!mounted) return;
+                          Navigator.pop(context);
+                          _showSnackBar("Password changed successfully.");
+                        } catch (error) {
+                          if (!mounted) return;
+                          _infoDialog("Failed to change password: $error");
+                        }
                       },
                       child: const Text("Update"),
                     ),
                   ),
                 ],
-              )
+              ),
             ],
           ),
         ),
@@ -359,8 +440,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // ==================================================
   // HELPERS
   // ==================================================
-  Widget _passwordField(
-      String label, TextEditingController controller) {
+  Widget _passwordField(String label, TextEditingController controller) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
@@ -370,8 +450,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           labelText: label,
           filled: true,
           fillColor: const Color(0xFFF2F6FF),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
     );
@@ -385,8 +464,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFFE000),
-                foregroundColor: Colors.black),
+              backgroundColor: const Color(0xFFFFE000),
+              foregroundColor: Colors.black,
+            ),
             onPressed: () => Navigator.pop(context),
             child: const Text("OK"),
           ),
@@ -395,91 +475,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _notificationMenu() => PopupMenuButton<int>(
-        itemBuilder: (_) => notifications
-            .map(
-              (n) => PopupMenuItem<int>(
-                enabled: false,
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Text(n["title"]!,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold)),
-                    Text(n["message"]!,
-                        style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey)),
-                    Text(n["time"]!,
-                        style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey)),
-                    const Divider(),
-                  ],
-                ),
-              ),
-            )
-            .toList(),
-      );
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
 
-  Widget _infoRow(
-          IconData icon, String label, String value) =>
-      Row(
-        children: [
-          Icon(icon, color: const Color(0xFF0066CC)),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 12, color: Colors.grey)),
-              Text(value,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w500)),
-            ],
-          )),
-        ],
-      );
+  Widget _infoRow(IconData icon, String label, String value) => Row(
+    children: [
+      Icon(icon, color: const Color(0xFF0066CC)),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
+    ],
+  );
 
   BoxDecoration _cardDecoration() => BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-            color: const Color(0xFFFFCC00), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
-        ],
-      );
-
-  Widget _card(Widget child) =>
-      Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: _cardDecoration(),
-          child: child);
-
-  void _showProfileMenu(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(name),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const LoginScreen()),
-                    (_) => false,
-                  ),
-              child: const Text("Log out")),
-        ],
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(18),
+    border: Border.all(color: const Color(0xFFFFCC00), width: 1.2),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.05),
+        blurRadius: 10,
+        offset: const Offset(0, 4),
       ),
-    );
-  }
+    ],
+  );
+
+  Widget _card(Widget child) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(20),
+    decoration: _cardDecoration(),
+    child: child,
+  );
 }

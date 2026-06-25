@@ -49,6 +49,10 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>LookFor uses the camera to capture found item photos for reports.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>LookFor uses your photo library so you can attach item photos to reports.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
