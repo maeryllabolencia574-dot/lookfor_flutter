@@ -735,7 +735,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           type: 'lost_report_uploaded',
           title: 'Lost Report Uploaded',
           message:
-              'Your lost item report for "${report.name}" was uploaded successfully.',
+              'Your lost item report for "${report.name}" was uploaded successfully. We will notify you if a match is found.',
           reportType: 'Lost',
           itemId: savedReportId,
         );
@@ -745,7 +745,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           type: 'found_report_uploaded',
           title: 'Found Report Uploaded',
           message:
-              'Your found item report for "${report.name}" was uploaded successfully and is pending approval.',
+              'Your found item report for "${report.name}" was uploaded successfully. Surrender the item to the Discipline Office.',
           reportType: 'Found',
           itemId: savedReportId,
         );
@@ -1190,6 +1190,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
         return 'Pending';
       case 'rejected':
         return 'Rejected';
+      case 'approved':
+        return 'Approved';
+      case 'pending_approval':
+        return 'Pending Approval';
+      case 'pending_match':
+        return 'Pending Match';
+      case 'claimed':
+        return 'Claimed';
       default:
         return item.status;
     }
@@ -1215,7 +1223,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     _matchedAlertedReportIds.add(matchedReport.id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _showLostItemMatchedDialog();
+      _showLostItemMatchedDialog(matchedReport);
     });
   }
 
@@ -1599,7 +1607,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  void _showLostItemMatchedDialog() {
+  void _showLostItemMatchedDialog(ItemReport? matchedReport) {
+    final itemName = (matchedReport?.name ?? '').trim();
+    final itemLabel = itemName.isEmpty ? 'your lost item' : '"$itemName"';
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1635,12 +1646,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
           ],
         ),
-        content: const Text(
-          'Good news! Your lost item has been successfully matched.\n\n'
-          'Please proceed to the Discipline Office to claim your item. \n\nOr you may contact the Discipline Officer through message to verify the matched item\n\n'
+        content: Text(
+          'Good news! $itemLabel has been successfully matched.\n\n'
+          'You may contact the Discipline Officer through message to verify the matched item.\n\n'
+          'Or proceed to the Discipline Office to verify and claim your item.\n\n'
           'Kindly bring a valid ID or proof of ownership for verification.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, height: 1.4),
+          style: const TextStyle(fontSize: 14, height: 1.4),
         ),
         actions: [
           SizedBox(
