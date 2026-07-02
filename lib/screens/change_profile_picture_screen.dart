@@ -14,7 +14,10 @@ class ChangeProfilePictureScreen extends StatefulWidget {
 
 class _ChangeProfilePictureScreenState
     extends State<ChangeProfilePictureScreen> {
+  static const Set<String> _allowedExtensions = {'jpg', 'jpeg', 'png', 'webp'};
+
   File? _selectedImage;
+  String? _errorMessage;
   bool _showDefaultPreview = false;
 
   Future<void> _pickImage(ImageSource source) async {
@@ -22,8 +25,18 @@ class _ChangeProfilePictureScreenState
     final picked = await picker.pickImage(source: source, imageQuality: 85);
 
     if (picked != null) {
+      final extension = picked.path.split('.').last.toLowerCase();
+      if (!_allowedExtensions.contains(extension)) {
+        setState(() {
+          _selectedImage = null;
+          _errorMessage = 'Please choose a JPG, JPEG, PNG, or WEBP image.';
+        });
+        return;
+      }
+
       setState(() {
         _selectedImage = File(picked.path);
+        _errorMessage = null;
         _showDefaultPreview = false;
       });
     }
@@ -32,6 +45,7 @@ class _ChangeProfilePictureScreenState
   void _removeSelectedImage() {
     setState(() {
       _selectedImage = null;
+      _errorMessage = null;
       _showDefaultPreview = true;
     });
   }
@@ -63,6 +77,17 @@ class _ChangeProfilePictureScreenState
             ),
 
             const SizedBox(height: 12),
+            if (_errorMessage != null) ...[
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             Text(
               _selectedImage != null
                   ? "New photo selected"

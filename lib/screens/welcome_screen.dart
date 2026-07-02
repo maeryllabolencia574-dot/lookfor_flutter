@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../services/api_client.dart';
 
-class WelcomeScreen extends StatelessWidget {
+
+// ...existing code...
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -13,37 +22,28 @@ class WelcomeScreen extends StatelessWidget {
             const Spacer(),
 
             // 🔹 Logo / Title
-            Column(
+            Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                RichText(
-                  text: const TextSpan(
-                    children: [
-                      TextSpan(
-                        text: "Look",
-                        style: TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF005BAB),
-                        ),
-                      ),
-                      TextSpan(
-                        text: "For",
-                        style: TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFFFFCC00),
-                        ),
-                      ),
-                    ],
+                Text(
+                  "Look",
+                  style: GoogleFonts.greatVibes(
+                    fontSize: 60,
+                    color: const Color(0xFF005BAB),
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 10),
-                const Icon(Icons.search, size: 40, color: Colors.grey),
+                Text(
+                  "For",
+                  style: GoogleFonts.greatVibes(
+                    fontSize: 60,
+                    color: const Color(0xFFFFCC00),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ],
             ),
-
-            const SizedBox(height: 40),
-
+            const SizedBox(height: 30),
             // 🔹 Biometrics Button
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -54,7 +54,7 @@ class WelcomeScreen extends StatelessWidget {
                   style: TextStyle(fontSize: 16),
                 ),
                 onPressed: () {
-                  // TODO: Add biometrics logic
+                  Navigator.pushNamed(context, '/biometric');
                 },
                 style: ElevatedButton.styleFrom(
                   minimumSize: const Size(double.infinity, 60),
@@ -98,9 +98,7 @@ class WelcomeScreen extends StatelessWidget {
 
             // 🔹 Forgot Password
             TextButton(
-              onPressed: () {
-                // TODO: forgot password logic
-              },
+              onPressed: _showForgotPasswordModal,
               child: const Text(
                 "Forgot Password?",
                 style: TextStyle(
@@ -123,29 +121,164 @@ class WelcomeScreen extends StatelessWidget {
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: const [
+                children: [
                   Column(
                     mainAxisSize: MainAxisSize.min,
-                    children: [
+                    children: const [
                       Icon(Icons.home, color: Color(0xFF005BAB)),
                       SizedBox(height: 4),
                       Text("Login"),
                     ],
                   ),
-                  VerticalDivider(width: 1),
-                  Column(
+                  const VerticalDivider(width: 1),
+                  /*Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.more_horiz, color: Colors.grey),
-                      SizedBox(height: 4),
-                      Text("More"),
+                      const Icon(Icons.more_horiz, color: Colors.grey),
+                      const SizedBox(height: 4),
+                      const Text("More"),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacementNamed(context, '/more');
+                        },
+                        child: const Text("More"),
+                      ),
                     ],
+                  ),*/
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.pushReplacementNamed(context, '/more');
+                    },
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.more_horiz, color: Colors.grey),
+                        SizedBox(height: 4),
+                        Text("More"),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  InputDecoration inputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      filled: true,
+      fillColor: Colors.grey[100],
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    );
+  }
+
+  void _showForgotPasswordModal() {
+    final TextEditingController resetEmail = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Forgot Password",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF003366),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                "Enter your STI email address and we will send you a verification code.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 20),
+
+              // EMAIL WITH BORDER
+              TextField(
+                controller: resetEmail,
+                decoration: inputDecoration("STI Email"),
+              ),
+
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFE000),
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: () async {
+                    if (!resetEmail.text.endsWith('@novaliches.sti.edu.ph') &&
+                        !resetEmail.text.endsWith('@novaliches.sti.edu')) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Please use a valid STI email"),
+                        ),
+                      );
+                      return;
+                    }
+
+                    try {
+                      await apiClient.requestPasswordReset(resetEmail.text);
+                      if (!mounted) return;
+                      Navigator.pop(context);
+                      _showOtpVerificationModal(resetEmail.text);
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            "Failed to send code: ${e.toString()}",
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text("Send Code"),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showOtpVerificationModal(String email) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Verification Code Sent'),
+        content: Text('A verification code was sent to $email.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

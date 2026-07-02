@@ -2,6 +2,15 @@ import 'package:flutter/material.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/welcome_screen.dart';
+import 'screens/biometric_screen.dart';
+import 'screens/more_screen.dart';
+import 'screens/contact_us_screen.dart';
+import 'screens/about_app_screen.dart';
+import 'screens/lets_chat_screen.dart';
+import 'screens/terms_condition_screen.dart';
+import 'screens/version_screen.dart';
+import 'screens/security_features_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -93,11 +102,28 @@ class LookForApp extends StatelessWidget {
           ),
         ),
       ),
-      initialRoute: '/login',
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/dashboard': (context) => const DashboardScreen(),
-      },
+      //initialRoute: '/login',
+      initialRoute: '/',
+      
+routes: {
+  '/': (context) => const WelcomeScreen(),
+  '/login': (context) => const LoginScreen(),
+  '/dashboard': (context) => const DashboardScreen(),
+  '/biometric': (context) => const BiometricScreen(), 
+  '/more': (context) => const MoreScreen(),
+  '/contact': (context) => const ContactUsScreen(),
+  '/about': (context) => const AboutAppScreen(),
+  '/lets-chat': (context) => const LetsChatScreen(),
+  '/terms': (context) => const TermsConditionScreen(),
+  '/version': (context) => const VersionScreen(),
+  '/security': (context) => const SecurityFeaturesScreen(),
+},
+
+        //'/login': (context) => const LoginScreen(),
+        //'/dashboard': (context) => const DashboardScreen(),
+
+        
+     
     );
   }
 }

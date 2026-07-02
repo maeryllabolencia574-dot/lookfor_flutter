@@ -45,13 +45,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _loadPersistedProfileImage();
     _fetchUserData();
   }
 
-  Future<void> _fetchUserData() async {
+  Future<void> _loadPersistedProfileImage() async {
+    final savedPath = await getPersistedProfileImagePath();
+    if (!mounted) return;
+
+    final persistedFile = savedPath != null && File(savedPath).existsSync()
+        ? File(savedPath)
+        : null;
+
+    setState(() {
+      profileImageFile = persistedFile;
+    });
+  }
+
+  Future<void> _fetchUserData({bool forceProfileImageRefresh = false}) async {
     try {
       final userData = await apiClient.getCurrentUser();
       if (!mounted) return;
+
+      final nextProfileImageUrl = apiClient.getProfileImageUrl(
+        userData['profile_pic'],
+      );
+      final savedPath = await getPersistedProfileImagePath();
+      final persistedFile = savedPath != null && File(savedPath).existsSync()
+          ? File(savedPath)
+          : null;
+
+      setProfileImageUrl(
+        nextProfileImageUrl,
+        forceNotify: forceProfileImageRefresh,
+      );
 
       setState(() {
         name = userData['full_name'] ?? "No Name";
@@ -64,16 +91,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             : "inactive";
         role = userData['role_label'] ?? "Student";
         emailAuthEnabled = userData['two_factor_enabled'] ?? false;
-        final rawProfilePic = userData['profile_pic']?.toString().trim();
-        profileImageFile = null;
-        final nextProfileImageUrl =
-            rawProfilePic == null ||
-                rawProfilePic.isEmpty ||
-                _isDefaultProfilePath(rawProfilePic)
-            ? null
-            : _withProfileImageVersion(apiClient.getImageUrl(rawProfilePic));
-        profileImageUrl = nextProfileImageUrl;
-        setProfileImageUrl(nextProfileImageUrl);
+        profileImageFile = persistedFile;
+        profileImageUrl = _withProfileImageVersion(nextProfileImageUrl);
         isLoading = false;
       });
     } catch (e) {
@@ -206,6 +225,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   setState(() => isLoading = true);
                   try {
                     final selectedImage = result["image"] as File;
+                    final savedImagePath = await persistProfileImageLocally(
+                      selectedImage,
+                    );
+
+                    if (mounted) {
+                      setState(() {
+                        profileImageFile = savedImagePath != null
+                            ? File(savedImagePath)
+                            : selectedImage;
+                        profileImageUrl = null;
+                      });
+                    }
+
                     await apiClient.updateProfile(
                       fullName: name,
                       studentNo: studentId,
@@ -213,11 +245,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       section: section,
                       profilePic: selectedImage,
                     );
-                    await _fetchUserData();
-                    notifyProfileImageChanged();
-                    if (mounted && profileImageUrl == null) {
-                      setState(() => profileImageFile = selectedImage);
-                    }
+                    await _fetchUserData(forceProfileImageRefresh: true);
                     _infoDialog("Profile picture updated successfully!");
                   } catch (e) {
                     _infoDialog("Update failed: $e");
@@ -235,17 +263,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  String _withProfileImageVersion(String url) {
-    if (url.isEmpty) return url;
+  String? _withProfileImageVersion(String? url) {
+    if (url == null || url.isEmpty) return url;
     final separator = url.contains('?') ? '&' : '?';
     return '$url${separator}v=${profileImageVersion.value}';
-  }
-
-  bool _isDefaultProfilePath(String value) {
-    final normalized = value.toLowerCase();
-    return normalized.contains('default-student-avatar') ||
-        normalized.contains('default-profile') ||
-        normalized.contains('default-avatar');
   }
 
   // ==================================================

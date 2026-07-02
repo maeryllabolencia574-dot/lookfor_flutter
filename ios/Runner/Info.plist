@@ -35,6 +35,9 @@
 			<key>UIWindowSceneSessionRoleApplication</key>
 			<array>
 				<dict>
+					<key>NSFaceIDUsageDescription</key>
+					<string>This app uses Face ID to authenticate you</string>
+
 					<key>UISceneClassName</key>
 					<string>UIWindowScene</string>
 					<key>UISceneConfigurationName</key>
