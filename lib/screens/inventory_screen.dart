@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/item_model.dart';
 import '../services/api_client.dart';
+import '../services/notification_center.dart';
 import '../widgets/app_bar_account_menu.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/notification_bell_button.dart';
@@ -12,8 +13,9 @@ import 'profile_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   final String type; // "Lost" or "Found"
+  final String? initialItemId;
 
-  const InventoryScreen({super.key, required this.type});
+  const InventoryScreen({super.key, required this.type, this.initialItemId});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -67,6 +69,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   ItemReport? _draftReport;
   bool _isLoading = true;
   bool _isSubmitting = false;
+  bool _handledInitialItem = false;
 
   @override
   void initState() {
@@ -149,6 +152,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ..addAll([..._pendingSubmittedReports, ...reports]);
         _isLoading = false;
       });
+      _openInitialItemIfNeeded();
       _showMatchedLostItemAlertIfNeeded(reports);
     } catch (e) {
       if (!mounted) return;
@@ -165,6 +169,35 @@ class _InventoryScreenState extends State<InventoryScreen> {
         report.dateTime.year == pending.dateTime.year &&
         report.dateTime.month == pending.dateTime.month &&
         report.dateTime.day == pending.dateTime.day;
+  }
+
+  void _openInitialItemIfNeeded() {
+    if (_handledInitialItem) return;
+    final itemId = widget.initialItemId?.trim();
+    if (itemId == null || itemId.isEmpty) return;
+
+    _handledInitialItem = true;
+    ItemReport? selected;
+    for (final report in _reports) {
+      if (report.id == itemId) {
+        selected = report;
+        break;
+      }
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (selected == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'The related ${widget.type.toLowerCase()} report could not be found.',
+            ),
+          ),
+        );
+        return;
+      }
+      _openViewItem(selected);
+    });
   }
 
   Future<void> _pickImages(StateSetter setModalState) async {
@@ -643,8 +676,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
       final timeFound = _formatApiTime(report.dateTime);
       final categoryId = _categoryIdsByName[report.category];
 
+      Map<String, dynamic> response;
       if (widget.type == 'Found') {
-        await apiClient.reportFoundItem(
+        response = await apiClient.reportFoundItem(
           itemName: report.name,
           category: report.category,
           categoryId: categoryId,
@@ -659,7 +693,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           referenceImage2: _draftImages.length > 2 ? _draftImages[2] : null,
         );
       } else {
-        await apiClient.reportLostItem(
+        response = await apiClient.reportLostItem(
           itemName: report.name,
           category: report.category,
           categoryId: categoryId,
@@ -674,17 +708,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
         );
       }
 
+      final savedReportId = _readReportId(response);
+      final savedReport = savedReportId == null
+          ? optimisticReport
+          : optimisticReport.copyWith(id: savedReportId);
+
       if (mounted) {
         setState(() {
           _pendingSubmittedReports.removeWhere(
-            (pending) => _isSameSubmittedReport(pending, optimisticReport),
+            (pending) => _isSameSubmittedReport(pending, savedReport),
           );
-          _pendingSubmittedReports.insert(0, optimisticReport);
+          _pendingSubmittedReports.insert(0, savedReport);
           _reports
             ..removeWhere(
-              (item) => _isSameSubmittedReport(item, optimisticReport),
+              (item) => _isSameSubmittedReport(item, savedReport),
             )
-            ..insert(0, optimisticReport);
+            ..insert(0, savedReport);
         });
       }
 
@@ -692,8 +731,24 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
       if (!mounted) return;
       if (widget.type == 'Lost') {
+        addLocalNotification(
+          type: 'lost_report_uploaded',
+          title: 'Lost Report Uploaded',
+          message:
+              'Your lost item report for "${report.name}" was uploaded successfully. We will notify you if a match is found.',
+          reportType: 'Lost',
+          itemId: savedReportId,
+        );
         _showLostReportSubmittedDialog();
       } else {
+        addLocalNotification(
+          type: 'found_report_uploaded',
+          title: 'Found Report Uploaded',
+          message:
+              'Your found item report for "${report.name}" was uploaded successfully. Surrender the item to the Discipline Office.',
+          reportType: 'Found',
+          itemId: savedReportId,
+        );
         _showFoundReportSubmittedDialog();
       }
 
@@ -706,6 +761,27 @@ class _InventoryScreenState extends State<InventoryScreen> {
         setState(() => _isSubmitting = false);
       }
     }
+  }
+
+  String? _readReportId(Map<String, dynamic> response) {
+    dynamic value = response['id'] ??
+        response['item_id'] ??
+        response['report_id'] ??
+        response['lost_item_id'] ??
+        response['found_item_id'];
+    final data = response['data'];
+    if ((value == null || value.toString().trim().isEmpty) &&
+        data is Map<String, dynamic>) {
+      value = data['id'] ??
+          data['item_id'] ??
+          data['report_id'] ??
+          data['lost_item_id'] ??
+          data['found_item_id'];
+    }
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty || text.toLowerCase() == 'null'
+        ? null
+        : text;
   }
 
   Widget _imageUploadArea(StateSetter setModalState) {
@@ -1114,6 +1190,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
         return 'Pending';
       case 'rejected':
         return 'Rejected';
+      case 'approved':
+        return 'Approved';
+      case 'pending_approval':
+        return 'Pending Approval';
+      case 'pending_match':
+        return 'Pending Match';
+      case 'claimed':
+        return 'Claimed';
       default:
         return item.status;
     }
@@ -1139,7 +1223,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     _matchedAlertedReportIds.add(matchedReport.id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _showLostItemMatchedDialog();
+      _showLostItemMatchedDialog(matchedReport);
     });
   }
 
@@ -1523,7 +1607,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  void _showLostItemMatchedDialog() {
+  void _showLostItemMatchedDialog(ItemReport? matchedReport) {
+    final itemName = (matchedReport?.name ?? '').trim();
+    final itemLabel = itemName.isEmpty ? 'your lost item' : '"$itemName"';
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1559,12 +1646,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
           ],
         ),
-        content: const Text(
-          'Good news! Your lost item has been successfully matched.\n\n'
-          'Please proceed to the Discipline Office to claim your item. \n\nOr you may contact the Discipline Officer through message to verify the matched item\n\n'
+        content: Text(
+          'Good news! $itemLabel has been successfully matched.\n\n'
+          'You may contact the Discipline Officer through message to verify the matched item.\n\n'
+          'Or proceed to the Discipline Office to verify and claim your item.\n\n'
           'Kindly bring a valid ID or proof of ownership for verification.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, height: 1.4),
+          style: const TextStyle(fontSize: 14, height: 1.4),
         ),
         actions: [
           SizedBox(

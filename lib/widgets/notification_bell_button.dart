@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../screens/inventory_screen.dart';
+import '../screens/messages_screen.dart';
+import '../screens/profile_screen.dart';
 import '../services/api_client.dart';
+import '../services/notification_center.dart';
 
 class NotificationBellButton extends StatefulWidget {
   const NotificationBellButton({super.key});
@@ -17,6 +21,17 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
   @override
   void initState() {
     super.initState();
+    notificationCenterVersion.addListener(_handleNotificationCenterChanged);
+    _loadNotifications();
+  }
+
+  @override
+  void dispose() {
+    notificationCenterVersion.removeListener(_handleNotificationCenterChanged);
+    super.dispose();
+  }
+
+  void _handleNotificationCenterChanged() {
     _loadNotifications();
   }
 
@@ -28,19 +43,31 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
       ]);
 
       if (!mounted) return;
+      final localNotifications = getLocalNotifications();
+      final serverNotifications = (results[0] as List<dynamic>)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      final notifications = [...localNotifications, ...serverNotifications]
+        ..sort(_compareNotificationsByDate);
+
       setState(() {
-        _notifications = (results[0] as List<dynamic>)
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList();
-        _unreadCount = results[1] as int;
+        _notifications = notifications;
+        _unreadCount =
+            (results[1] as int) +
+            localNotifications
+                .where((notification) => notification['is_read'] != true)
+                .length;
         _isLoading = false;
       });
     } catch (_) {
       if (!mounted) return;
+      final localNotifications = getLocalNotifications();
       setState(() {
-        _notifications = const [];
-        _unreadCount = 0;
+        _notifications = localNotifications;
+        _unreadCount = localNotifications
+            .where((notification) => notification['is_read'] != true)
+            .length;
         _isLoading = false;
       });
     }
@@ -52,26 +79,24 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
       return;
     }
 
-    final id = int.tryParse(value);
-    if (id == null) return;
-    
     final notification = _notifications.firstWhere(
       (item) => item['id']?.toString() == value,
       orElse: () => const <String, dynamic>{},
     );
-    final shouldShowMatchDialog = _isLostItemMatchedNotification(notification);
+    if (notification.isEmpty) return;
 
     try {
-      await apiClient.markNotificationAsRead(id);
+      if (notification['is_local'] == true) {
+        markLocalNotificationAsRead(value);
+      } else {
+        final id = int.tryParse(value);
+        if (id != null) {
+          await apiClient.markNotificationAsRead(id);
+        }
+      }
       await _loadNotifications();
       if (!mounted) return;
-      if (shouldShowMatchDialog) {
-        _showLostItemMatchedDialog();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Notification marked as read.')),
-        );
-      }
+      _openNotificationTarget(notification);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -208,7 +233,109 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
     );
   }
 
+  void _openNotificationTarget(Map<String, dynamic> notification) {
+    final route = _notificationRoute(notification);
+    final itemId = _notificationItemId(notification);
+
+    if (route == _NotificationRoute.messages) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const MessagesScreen()),
+      );
+      return;
+    }
+
+    if (route == _NotificationRoute.profile) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+      );
+      return;
+    }
+
+    if (route == _NotificationRoute.lostInventory ||
+        route == _NotificationRoute.foundInventory) {
+      final type = route == _NotificationRoute.lostInventory ? 'Lost' : 'Found';
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InventoryScreen(type: type, initialItemId: itemId),
+        ),
+      );
+
+      if (_isLostItemMatchedNotification(notification)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showLostItemMatchedDialog();
+        });
+      }
+      return;
+    }
+
+    _showNotificationDetails(notification);
+  }
+
+  _NotificationRoute _notificationRoute(Map<String, dynamic> notification) {
+    final combined = _combinedNotificationText(notification);
+
+    if (combined.contains('message') ||
+        combined.contains('chat') ||
+        combined.contains('conversation')) {
+      return _NotificationRoute.messages;
+    }
+
+    if (combined.contains('profile') ||
+        combined.contains('password') ||
+        combined.contains('account') ||
+        combined.contains('security')) {
+      return _NotificationRoute.profile;
+    }
+
+    if (combined.contains('lost')) return _NotificationRoute.lostInventory;
+    if (combined.contains('found') ||
+        combined.contains('approval') ||
+        combined.contains('approved') ||
+        combined.contains('surrender')) {
+      return _NotificationRoute.foundInventory;
+    }
+
+    if (combined.contains('match')) return _NotificationRoute.lostInventory;
+    if (combined.contains('report') || combined.contains('item')) {
+      return _NotificationRoute.foundInventory;
+    }
+
+    return _NotificationRoute.details;
+  }
+
+  String? _notificationItemId(Map<String, dynamic> notification) {
+    dynamic value = notification['item_id'] ??
+        notification['report_id'] ??
+        notification['lost_item_id'] ??
+        notification['found_item_id'] ??
+        notification['related_id'] ??
+        notification['target_id'];
+    final data = notification['data'];
+    if ((value == null || value.toString().trim().isEmpty) &&
+        data is Map<String, dynamic>) {
+      value = data['item_id'] ??
+          data['report_id'] ??
+          data['id'] ??
+          data['lost_item_id'] ??
+          data['found_item_id'] ??
+          data['related_id'] ??
+          data['target_id'];
+    }
+
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty || text.toLowerCase() == 'null') {
+      return null;
+    }
+    return text;
+  }
+
   String _notificationTitle(Map<String, dynamic> notification) {
+    final title = notification['title']?.toString().trim();
+    if (title != null && title.isNotEmpty) return title;
+
     final type = notification['type']?.toString().trim();
     if (type != null && type.isNotEmpty) {
       return _humanizeType(type);
@@ -218,7 +345,12 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
 
   bool _isLostItemMatchedNotification(Map<String, dynamic> notification) {
     if (notification.isEmpty) return false;
+    final combined = _combinedNotificationText(notification);
+    return combined.contains('match') &&
+        (combined.contains('lost') || combined.contains('lost item'));
+  }
 
+  String _combinedNotificationText(Map<String, dynamic> notification) {
     final type = notification['type']?.toString().toLowerCase() ?? '';
     final title = _notificationTitle(notification).toLowerCase();
     final message = _notificationMessage(notification).toLowerCase();
@@ -228,10 +360,9 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
             ?.toString()
             .toLowerCase() ??
         '';
-    final combined = '$type $title $message $status $itemType';
+    final data = notification['data']?.toString().toLowerCase() ?? '';
 
-    return combined.contains('match') &&
-        (combined.contains('lost') || combined.contains('lost item'));
+    return '$type $title $message $status $itemType $data';
   }
 
   void _showLostItemMatchedDialog() {
@@ -298,6 +429,22 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
     );
   }
 
+  void _showNotificationDetails(Map<String, dynamic> notification) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(_notificationTitle(notification)),
+        content: Text(_notificationMessage(notification)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _notificationMessage(Map<String, dynamic> notification) {
     final message = notification['message']?.toString().trim() ?? '';
     return message.isEmpty ? 'No message provided.' : message;
@@ -327,4 +474,24 @@ class _NotificationBellButtonState extends State<NotificationBellButton> {
         .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
         .join(' ');
   }
+
+  int _compareNotificationsByDate(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+  ) {
+    final aDate = DateTime.tryParse(a['created_at']?.toString() ?? '');
+    final bDate = DateTime.tryParse(b['created_at']?.toString() ?? '');
+    if (aDate == null && bDate == null) return 0;
+    if (aDate == null) return 1;
+    if (bDate == null) return -1;
+    return bDate.compareTo(aDate);
+  }
+}
+
+enum _NotificationRoute {
+  details,
+  foundInventory,
+  lostInventory,
+  messages,
+  profile,
 }

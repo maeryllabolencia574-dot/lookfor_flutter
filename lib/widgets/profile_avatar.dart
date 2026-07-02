@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'dart:io';
 import '../services/api_client.dart';
 import '../services/profile_image_notifier.dart';
 
@@ -23,6 +23,7 @@ class ProfileAvatar extends StatefulWidget {
 
 class _ProfileAvatarState extends State<ProfileAvatar> {
   String? _imageUrl;
+  String? _localPath;
 
   @override
   void initState() {
@@ -39,10 +40,26 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
 
   Future<void> _loadProfileImage() async {
     final version = profileImageVersion.value;
+    final savedPath = await getPersistedProfileImagePath();
+    final resolvedLocalPath = savedPath != null && File(savedPath).existsSync()
+        ? savedPath
+        : null;
+
+    if (resolvedLocalPath != null) {
+      if (!mounted) return;
+      setState(() {
+        _imageUrl = null;
+        _localPath = resolvedLocalPath;
+      });
+      return;
+    }
+
     final cachedUrl = profileImageUrl.value;
     if (cachedUrl != null) {
+      if (!mounted) return;
       setState(() {
         _imageUrl = _withCacheVersion(cachedUrl, version);
+        _localPath = null;
       });
       return;
     }
@@ -51,49 +68,48 @@ class _ProfileAvatarState extends State<ProfileAvatar> {
       final userData = await apiClient.getCurrentUser();
       if (!mounted) return;
 
-      final rawPath = userData['profile_pic']?.toString().trim();
-      final nextUrl =
-          rawPath == null || rawPath.isEmpty || _isDefaultProfilePath(rawPath)
-          ? null
-          : _withCacheVersion(apiClient.getImageUrl(rawPath), version);
+      final nextUrl = _withCacheVersion(
+        apiClient.getProfileImageUrl(userData['profile_pic']),
+        version,
+      );
 
       setState(() {
         _imageUrl = nextUrl;
+        _localPath = null;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _imageUrl = null;
+        _localPath = null;
       });
     }
   }
 
-  String _withCacheVersion(String url, int version) {
-    if (url.isEmpty) return url;
+  String? _withCacheVersion(String? url, int version) {
+    if (url == null || url.isEmpty) return url;
     final separator = url.contains('?') ? '&' : '?';
     return '$url${separator}v=$version';
-  }
-
-  bool _isDefaultProfilePath(String value) {
-    final normalized = value.toLowerCase();
-    return normalized.contains('default-student-avatar') ||
-        normalized.contains('default-profile') ||
-        normalized.contains('default-avatar');
   }
 
   @override
   Widget build(BuildContext context) {
     final imageUrl = _imageUrl;
+    final localPath = _localPath;
     final iconSize = widget.iconSize ?? widget.radius * 1.25;
+    final imageProvider = buildProfileImageProvider(
+      remoteUrl: imageUrl,
+      localPath: localPath,
+    );
 
     return CircleAvatar(
       radius: widget.radius,
       backgroundColor: widget.backgroundColor,
-      backgroundImage: imageUrl == null ? null : NetworkImage(imageUrl),
-      onBackgroundImageError: imageUrl == null
+      backgroundImage: imageProvider,
+      onBackgroundImageError: imageProvider == null
           ? null
           : (exception, stackTrace) {},
-      child: imageUrl == null
+      child: imageProvider == null
           ? Icon(Icons.person, color: widget.iconColor, size: iconSize)
           : null,
     );

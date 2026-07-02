@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dashboard_screen.dart';
 import '../services/api_client.dart';
+import '../services/auth_session_store.dart';
+import 'welcome_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -75,7 +77,10 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      await _continueAfterAuthenticated(currentPassword: password.text);
+      await _continueAfterAuthenticated(
+        currentPassword: password.text,
+        authenticatedEmail: email.text,
+      );
     } catch (e) {
       setState(() => isLoading = false);
       if (mounted) {
@@ -88,6 +93,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _continueAfterAuthenticated({
     required String currentPassword,
+    required String authenticatedEmail,
   }) async {
     try {
       final user = await apiClient.getCurrentUser();
@@ -101,6 +107,15 @@ class _LoginScreenState extends State<LoginScreen> {
           currentPassword: currentPassword,
         );
         if (!changed || !mounted) return;
+      }
+
+      final accessToken = apiClient.accessToken;
+      if (accessToken != null && accessToken.isNotEmpty) {
+        await AuthSessionStore.save(
+          accessToken: accessToken,
+          isAdmin: apiClient.isAdmin,
+          email: authenticatedEmail,
+        );
       }
 
       if (!mounted) return;
@@ -435,6 +450,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Navigator.pop(context);
                       await _continueAfterAuthenticated(
                         currentPassword: password.text,
+                        authenticatedEmail: email,
                       );
                     }
                   } catch (e) {
@@ -553,151 +569,287 @@ class _LoginScreenState extends State<LoginScreen> {
   // OTP VERIFICATION MODAL
   // =====================
   void _showOtpVerificationModal(String email) {
-    final controllers = List.generate(6, (_) => TextEditingController());
-    final newPasswordController = TextEditingController();
+  final controllers = List.generate(6, (_) => TextEditingController());
+  final newPasswordController = TextEditingController();
+  final confirmPasswordController = TextEditingController();
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  bool obscureNewPassword = true;
+  bool obscureConfirmPassword = true;
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => StatefulBuilder(
+      builder: (context, setModalState) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Reset Password",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF003366),
-                ),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
-              const SizedBox(height: 16),
-
-              // OTP BOXES
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: controllers.map((c) {
-                  return SizedBox(
-                    width: 45,
-                    child: TextField(
-                      controller: c,
-                      maxLength: 1,
-                      textAlign: TextAlign.center,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        counterText: "",
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                            color: Colors.grey,
-                            width: 1,
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                            color: Color(0xFF0066CC),
-                            width: 1,
-                          ),
-                        ),
-                      ),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    "Reset Password",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF003366),
                     ),
-                  );
-                }).toList(),
-              ),
-
-              const SizedBox(height: 16),
-
-              // NEW PASSWORD FIELD
-              TextField(
-                controller: newPasswordController,
-                obscureText: true,
-                decoration: inputDecoration("New Password"),
-              ),
-
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFFE000),
-                    foregroundColor: Colors.black,
                   ),
-                  onPressed: () async {
-                    final code = controllers.map((c) => c.text).join();
-                    if (code.length != 6) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Please enter all 6 digits"),
-                        ),
-                      );
-                      return;
-                    }
 
-                    if (newPasswordController.text.length < 6) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            "Password must be at least 6 characters",
-                          ),
-                        ),
-                      );
-                      return;
-                    }
+                  const SizedBox(height: 8),
 
-                    try {
-                      await apiClient.resetPassword(
-                        email,
-                        code,
-                        newPasswordController.text,
-                      );
-                      if (mounted) {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              "Password reset successful. Please login.",
+                  const Text(
+                    "Enter the verification code sent to your email and create a new password.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: controllers.map((c) {
+                      return SizedBox(
+                        width: 45,
+                        child: TextField(
+                          controller: c,
+                          maxLength: 1,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            counterText: "",
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                color: Colors.grey,
+                                width: 1,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF0066CC),
+                                width: 1,
+                              ),
                             ),
                           ),
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text("Reset failed: ${e.toString()}"),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  child: const Text("Reset Password"),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  TextField(
+                    controller: newPasswordController,
+                    obscureText: obscureNewPassword,
+                    decoration: inputDecoration(
+                      "New Password",
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureNewPassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                        ),
+                        onPressed: () {
+                          setModalState(() {
+                            obscureNewPassword =
+                                !obscureNewPassword;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: obscureConfirmPassword,
+                    decoration: inputDecoration(
+                      "Confirm Password",
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscureConfirmPassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                        ),
+                        onPressed: () {
+                          setModalState(() {
+                            obscureConfirmPassword =
+                                !obscureConfirmPassword;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            const Color(0xFFFFE000),
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () async {
+                        final code =
+                            controllers.map((c) => c.text).join();
+
+                        if (code.length != 6) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Please enter all 6 digits",
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        if (!_isStrongPassword(
+                          newPasswordController.text,
+                          '',
+                        )) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Password must contain uppercase, lowercase, number, special character and be at least 8 characters long.",
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        if (newPasswordController.text !=
+                            confirmPasswordController.text) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Passwords do not match",
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        try {
+                          await apiClient.resetPassword(
+                            email,
+                            code,
+                            newPasswordController.text,
+                          );
+
+                          if (mounted) {
+                            Navigator.pop(context);
+
+                            ScaffoldMessenger.of(this.context)
+                                .showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  "Password reset successful. Please login.",
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(this.context)
+                                .showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  "Reset failed: ${e.toString()}",
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      child: const Text("Reset Password"),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  ).whenComplete(() {
+    for (final controller in controllers) {
+      controller.dispose();
+    }
+
+    newPasswordController.dispose();
+    confirmPasswordController.dispose();
+  });
+}
+Widget _buildback({
+    required IconData icon,
+    required String text,
+    IconData? trailingIcon,
+    Color? trailingColor,
+    VoidCallback? onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          
+          child: Row(
+            children: [
+              Icon(icon, size: 30, color: const Color(0xFF005BAB)),
+              const SizedBox(width: 16),
+
+              Expanded(
+                child: Text(
+                  text,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Color(0xFF1F2937),
+                  ),
                 ),
               ),
+
+              if (trailingIcon != null)
+                Icon(trailingIcon,
+                    color: trailingColor ?? Colors.grey),
             ],
           ),
         ),
       ),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      
       backgroundColor: Colors.white,
       body: Center(
         child: SingleChildScrollView(
+          
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 24),
             padding: const EdgeInsets.all(24),
@@ -709,6 +861,14 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                _buildback(
+              icon: Icons.arrow_back,
+              text: "Back",
+              //trailingIcon: Icons.arrow_forward_ios,
+              onTap: () {
+                Navigator.pushReplacementNamed(context, '/');
+              },
+            ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -717,6 +877,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: GoogleFonts.greatVibes(
                         fontSize: 44,
                         color: Color(0xFF0066CC),
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     Text(
@@ -724,6 +885,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: GoogleFonts.greatVibes(
                         fontSize: 44,
                         color: const Color(0xFFFFE000),
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
@@ -775,6 +937,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _showForgotPasswordModal,
                   child: const Text("Forgot Password"),
                 ),
+                Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.lock),
+                label: const Text(
+                  "Log in with biometrics",
+                  style: TextStyle(fontSize: 16),
+                ),
+                onPressed: () {
+                  Navigator.pushReplacementNamed(context, '/biometric');
+                },
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 60),
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF005BAB),
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+
+            const Spacer(),
               ],
             ),
           ),

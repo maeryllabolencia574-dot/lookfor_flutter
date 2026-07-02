@@ -5,7 +5,6 @@ import 'package:http_parser/http_parser.dart';
 
 class ApiService {
   static const String baseUrl = 'https://lookfor-app-aafd5427.azurewebsites.net';
-  
 
   String? _accessToken;
   bool? _isAdmin;
@@ -155,7 +154,7 @@ class ApiService {
     }
   }
 
-  Future<void> updateProfile({
+  Future<Map<String, dynamic>> updateProfile({
     required String fullName,
     required String studentNo,
     required String course,
@@ -174,17 +173,26 @@ class ApiService {
     request.fields['section'] = section;
 
     if (profilePic != null) {
-      request.files.add(
-        await http.MultipartFile.fromPath('profile_pic', profilePic.path),
-      );
+      request.files.add(await _buildImagePart('profile_pic', profilePic));
     }
 
     final streamedResponse = await request.send();
     final response = await http.Response.fromStream(streamedResponse);
 
-    if (response.statusCode != 200) {
-      throw ApiException('Failed to update profile');
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (response.body.trim().isEmpty) return <String, dynamic>{};
+      final decoded = json.decode(response.body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     }
+
+    dynamic error;
+    try {
+      error = json.decode(response.body);
+    } catch (_) {}
+    throw ApiException(
+      _extractErrorMessage(error) ??
+          'Failed to update profile (${response.statusCode})',
+    );
   }
 
   Future<Map<String, dynamic>> reportFoundItem({
@@ -482,14 +490,24 @@ class ApiService {
     };
   }
 
-  String getImageUrl(String? relativePath) {
-    if (relativePath == null || relativePath.isEmpty) {
+  String getImageUrl(String? imagePath) {
+    if (imagePath == null || imagePath.trim().isEmpty) {
       return '';
     }
-    final path = relativePath.startsWith('/')
-        ? relativePath.substring(1)
-        : relativePath;
+    final value = imagePath.trim();
+    final uri = Uri.tryParse(value);
+    if (uri != null && uri.hasScheme) return value;
+
+    final path = value.startsWith('/') ? value.substring(1) : value;
     return '$baseUrl/$path';
+  }
+
+  String? getProfileImageUrl(dynamic profilePic) {
+    final rawPath = profilePic?.toString().trim();
+    if (rawPath == null || rawPath.isEmpty || _isDefaultProfilePath(rawPath)) {
+      return null;
+    }
+    return getImageUrl(rawPath);
   }
 
   Future<http.MultipartFile> _buildImagePart(String fieldName, File file) async {
@@ -499,8 +517,8 @@ class ApiService {
       'png' => MediaType('image', 'png'),
       'webp' => MediaType('image', 'webp'),
       _ => throw ApiException(
-          'Unsupported image type ".$extension". Please upload JPG, JPEG, PNG, or WEBP.',
-        ),
+        'Unsupported image type "$extension". Please upload JPG, JPEG, PNG, or WEBP.',
+      ),
     };
 
     return http.MultipartFile.fromPath(
@@ -541,6 +559,13 @@ class ApiService {
     }
 
     return null;
+  }
+
+  bool _isDefaultProfilePath(String value) {
+    final normalized = value.toLowerCase();
+    return normalized.contains('default-student-avatar') ||
+        normalized.contains('default-profile') ||
+        normalized.contains('default-avatar');
   }
 }
 

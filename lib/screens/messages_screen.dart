@@ -162,6 +162,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
         _currentUserRole = userData['role_label']?.toString() ?? 'Student';
         _isLoading = false;
       });
+
+      await _loadExistingConversations();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -181,8 +183,84 @@ class _MessagesScreenState extends State<MessagesScreen> {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(
       const Duration(milliseconds: 350),
-      () => _searchUsersAndConversations(query),
+      () {
+        final trimmed = query.trim();
+        if (trimmed.length < 2) {
+          _loadExistingConversations();
+        } else {
+          _searchUsersAndConversations(trimmed);
+        }
+      },
     );
+  }
+
+  Future<void> _loadExistingConversations() async {
+    final currentId = _currentUserId;
+    if (currentId == null) return;
+
+    setState(() {
+      _isSearching = true;
+      _searchMessage = null;
+    });
+
+    try {
+      final results = await apiClient.searchUsers('');
+      final users = results
+          .whereType<Map<String, dynamic>>()
+          .map(LookForUser.fromJson)
+          .where((user) => user.id != 0 && user.id != currentId)
+          .toList();
+
+      final previews = <ConversationPreview>[];
+      for (final user in users) {
+        try {
+          final history = await apiClient.getChatHistory(user.id);
+          final messages = history
+              .whereType<Map<String, dynamic>>()
+              .map(ChatMessage.fromJson)
+              .where(
+                (message) =>
+                    message.content.trim().isNotEmpty || message.hasImage,
+              )
+              .toList();
+
+          if (messages.isNotEmpty) {
+            previews.add(
+              ConversationPreview(user: user, lastMessage: messages.last),
+            );
+          }
+        } on ApiException {
+          // Keep the conversation list usable even if one preview fails.
+        }
+      }
+
+      previews.sort((a, b) {
+        final left = a.lastMessage.createdAt;
+        final right = b.lastMessage.createdAt;
+        if (left == null && right == null) return 0;
+        if (left == null) return 1;
+        if (right == null) return -1;
+        return right.compareTo(left);
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _conversationPreviews = previews;
+        _userResults = [];
+        _searchMessage = previews.isEmpty
+            ? 'No conversations yet. Search a student, office, or admin to start chatting.'
+            : null;
+        _isSearching = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _conversationPreviews = [];
+        _userResults = [];
+        _searchMessage = e.message;
+        _isSearching = false;
+      });
+    }
   }
 
   Future<void> _searchUsersAndConversations(String query) async {
