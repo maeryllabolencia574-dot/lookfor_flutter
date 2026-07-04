@@ -4,7 +4,7 @@
     <application
         android:label="LookFor"
         android:name="${applicationName}"
-        android:icon="@mipmap/lookfor">
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

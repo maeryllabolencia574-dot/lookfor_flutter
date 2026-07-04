@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -209,6 +210,10 @@ class ApiService {
     File? referenceImage1,
     File? referenceImage2,
   }) async {
+    developer.log('[ApiService] reportFoundItem START - POST $baseUrl/student/found', name: 'LookFor');
+    developer.log('[ApiService] reportFoundItem fields: itemName=$itemName, category=$category, categoryId=$categoryId, date=$date, timeFound=$timeFound', name: 'LookFor');
+    developer.log('[ApiService] reportFoundItem images: main=${mainImage.path}, ref1=${referenceImage1?.path}, ref2=${referenceImage2?.path}', name: 'LookFor');
+    
     var request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl/student/found'),
@@ -247,8 +252,16 @@ class ApiService {
       );
     }
 
-    final streamedResponse = await request.send();
+    developer.log('[ApiService] reportFoundItem sending request...', name: 'LookFor');
+    final streamedResponse = await request.send().timeout(
+      const Duration(seconds: 60),
+      onTimeout: () {
+        developer.log('[ApiService] reportFoundItem TIMEOUT after 60s', name: 'LookFor');
+        throw ApiException('Upload timed out. Please check your internet connection and try again.');
+      },
+    );
     final response = await http.Response.fromStream(streamedResponse);
+    developer.log('[ApiService] reportFoundItem response: status=${response.statusCode}, body=${response.body}', name: 'LookFor');
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);
@@ -257,10 +270,10 @@ class ApiService {
       try {
         error = json.decode(response.body);
       } catch (_) {}
-      throw ApiException(
-        _extractErrorMessage(error) ??
-            'Failed to report found item (${response.statusCode})',
-      );
+      final msg = _extractErrorMessage(error) ??
+          'Failed to report found item (${response.statusCode})';
+      developer.log('[ApiService] reportFoundItem FAILED: $msg', name: 'LookFor');
+      throw ApiException(msg);
     }
   }
 
@@ -277,6 +290,10 @@ class ApiService {
     File? referenceImage1,
     File? referenceImage2,
   }) async {
+    developer.log('[ApiService] reportLostItem START - POST $baseUrl/student/items/lost/report', name: 'LookFor');
+    developer.log('[ApiService] reportLostItem fields: itemName=$itemName, category=$category, categoryId=$categoryId, date=$date', name: 'LookFor');
+    developer.log('[ApiService] reportLostItem images: main=${mainImage.path}, ref1=${referenceImage1?.path}, ref2=${referenceImage2?.path}', name: 'LookFor');
+    
     var request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl/student/items/lost/report'),
@@ -314,8 +331,16 @@ class ApiService {
       );
     }
 
-    final streamedResponse = await request.send();
+    developer.log('[ApiService] reportLostItem sending request...', name: 'LookFor');
+    final streamedResponse = await request.send().timeout(
+      const Duration(seconds: 60),
+      onTimeout: () {
+        developer.log('[ApiService] reportLostItem TIMEOUT after 60s', name: 'LookFor');
+        throw ApiException('Upload timed out. Please check your internet connection and try again.');
+      },
+    );
     final response = await http.Response.fromStream(streamedResponse);
+    developer.log('[ApiService] reportLostItem response: status=${response.statusCode}, body=${response.body}', name: 'LookFor');
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);
@@ -324,35 +349,55 @@ class ApiService {
       try {
         error = json.decode(response.body);
       } catch (_) {}
-      throw ApiException(
-        _extractErrorMessage(error) ??
-            'Failed to report lost item (${response.statusCode})',
-      );
+      final msg = _extractErrorMessage(error) ??
+          'Failed to report lost item (${response.statusCode})';
+      developer.log('[ApiService] reportLostItem FAILED: $msg', name: 'LookFor');
+      throw ApiException(msg);
     }
   }
 
   Future<List<dynamic>> getMyFoundItems() async {
+    developer.log('[ApiService] getMyFoundItems START - GET $baseUrl/student/items/found/me', name: 'LookFor');
+    developer.log('[ApiService] Token present: ${_accessToken != null}', name: 'LookFor');
     final response = await http.get(
       Uri.parse('$baseUrl/student/items/found/me'),
       headers: _authHeaders(),
-    );
+    ).timeout(const Duration(seconds: 30), onTimeout: () {
+      developer.log('[ApiService] getMyFoundItems TIMEOUT after 30s', name: 'LookFor');
+      throw ApiException('Request timed out. Please check your internet connection and try again.');
+    });
+
+    developer.log('[ApiService] getMyFoundItems response: status=${response.statusCode}, bodyLength=${response.body.length}', name: 'LookFor');
 
     if (response.statusCode == 200) {
-      return json.decode(response.body);
+      final decoded = json.decode(response.body);
+      developer.log('[ApiService] getMyFoundItems decoded ${(decoded as List).length} items', name: 'LookFor');
+      return decoded;
     } else {
+      developer.log('[ApiService] getMyFoundItems FAILED: ${response.body}', name: 'LookFor');
       throw ApiException('Failed to load found items');
     }
   }
 
   Future<List<dynamic>> getMyLostReports() async {
+    developer.log('[ApiService] getMyLostReports START - GET $baseUrl/student/api/items/lost/me', name: 'LookFor');
+    developer.log('[ApiService] Token present: ${_accessToken != null}', name: 'LookFor');
     final response = await http.get(
       Uri.parse('$baseUrl/student/api/items/lost/me'),
       headers: _authHeaders(),
-    );
+    ).timeout(const Duration(seconds: 30), onTimeout: () {
+      developer.log('[ApiService] getMyLostReports TIMEOUT after 30s', name: 'LookFor');
+      throw ApiException('Request timed out. Please check your internet connection and try again.');
+    });
+
+    developer.log('[ApiService] getMyLostReports response: status=${response.statusCode}, bodyLength=${response.body.length}', name: 'LookFor');
 
     if (response.statusCode == 200) {
-      return json.decode(response.body);
+      final decoded = json.decode(response.body);
+      developer.log('[ApiService] getMyLostReports decoded ${(decoded as List).length} items', name: 'LookFor');
+      return decoded;
     } else {
+      developer.log('[ApiService] getMyLostReports FAILED: ${response.body}', name: 'LookFor');
       throw ApiException('Failed to load lost reports');
     }
   }

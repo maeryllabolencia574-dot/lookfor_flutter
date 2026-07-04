@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../services/notification_center.dart';
 import '../widgets/app_bar_account_menu.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/notification_bell_button.dart';
+import 'upload_item_screen.dart';
 import 'profile_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -70,6 +72,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   bool _isLoading = true;
   bool _isSubmitting = false;
   bool _handledInitialItem = false;
+  bool _isLoadingReports = false; // guard against concurrent _loadReports calls
 
   @override
   void initState() {
@@ -80,8 +83,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _loadCategories() async {
+    developer.log('[InventoryScreen] _loadCategories START', name: 'LookFor');
     try {
       final rawCategories = await apiClient.getCategories();
+      developer.log('[InventoryScreen] _loadCategories got ${rawCategories.length} categories', name: 'LookFor');
       if (!mounted) return;
 
       setState(() {
@@ -107,7 +112,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 .where((name) => name.isNotEmpty),
           );
       });
-    } catch (_) {
+      developer.log('[InventoryScreen] _loadCategories COMPLETE - ${_categories.length} categories loaded', name: 'LookFor');
+    } catch (e, stackTrace) {
+      developer.log('[InventoryScreen] _loadCategories FAILED: $e', name: 'LookFor', error: e, stackTrace: stackTrace);
       if (!mounted) return;
       setState(() {
         _categoryIdsByName.clear();
@@ -123,14 +130,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _loadReports() async {
+    // Prevent concurrent calls (e.g. RefreshIndicator + _submitReport both triggering)
+    if (_isLoadingReports) {
+      developer.log('[InventoryScreen] _loadReports SKIPPED - already in progress', name: 'LookFor');
+      return;
+    }
+    _isLoadingReports = true;
+    
+    developer.log('[InventoryScreen] _loadReports START (type=${widget.type})', name: 'LookFor');
     if (mounted) {
       setState(() => _isLoading = true);
     }
 
     try {
+      developer.log('[InventoryScreen] Calling API: ${widget.type == 'Found' ? 'getMyFoundItems' : 'getMyLostReports'}...', name: 'LookFor');
       final rawItems = widget.type == 'Found'
           ? await apiClient.getMyFoundItems()
           : await apiClient.getMyLostReports();
+
+      developer.log('[InventoryScreen] API returned ${rawItems.length} items', name: 'LookFor');
 
       final reports = rawItems
           .map(
@@ -140,6 +158,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
           )
           .toList();
+      
+      developer.log('[InventoryScreen] Parsed ${reports.length} reports successfully', name: 'LookFor');
+      
       _pendingSubmittedReports.removeWhere(
         (pending) =>
             reports.any((report) => _isSameSubmittedReport(report, pending)),
@@ -152,12 +173,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ..addAll([..._pendingSubmittedReports, ...reports]);
         _isLoading = false;
       });
+      developer.log('[InventoryScreen] _loadReports COMPLETE - ${_reports.length} total reports in list', name: 'LookFor');
       _openInitialItemIfNeeded();
       _showMatchedLostItemAlertIfNeeded(reports);
-    } catch (e) {
+    } catch (e, stackTrace) {
+      developer.log('[InventoryScreen] _loadReports FAILED: $e', name: 'LookFor', error: e, stackTrace: stackTrace);
       if (!mounted) return;
       setState(() => _isLoading = false);
       _infoDialog('Failed to load ${widget.type.toLowerCase()} items: $e');
+    } finally {
+      _isLoadingReports = false;
     }
   }
 
@@ -212,10 +237,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final picker = ImagePicker();
     final List<XFile> picked;
     if (remainingSlots == 1) {
-      final image = await picker.pickImage(source: ImageSource.gallery);
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 1200,
+        maxHeight: 1200,
+      );
       picked = image == null ? <XFile>[] : <XFile>[image];
     } else {
-      picked = await picker.pickMultiImage(limit: remainingSlots);
+      picked = await picker.pickMultiImage(
+        imageQuality: 70,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        limit: remainingSlots,
+      );
     }
     if (picked.isEmpty) return;
 
@@ -259,7 +294,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final picker = ImagePicker();
     final image = await picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 85,
+      imageQuality: 70,
+      maxWidth: 1200,
+      maxHeight: 1200,
     );
     if (image == null) return;
 
@@ -321,7 +358,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
     if (source == null) return;
 
     final picker = ImagePicker();
-    final image = await picker.pickImage(source: source, imageQuality: 85);
+    final image = await picker.pickImage(
+      source: source,
+      imageQuality: 70,
+      maxWidth: 1200,
+      maxHeight: 1200,
+    );
     if (image == null) return;
 
     final file = File(image.path);
@@ -387,271 +429,51 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  void _openUploadItemModal() {
-    final name = TextEditingController(text: _draftReport?.name);
-    final brand = TextEditingController(text: _draftReport?.brand);
-    final color = TextEditingController(text: _draftReport?.color);
-    final description = TextEditingController(text: _draftReport?.description);
-    final location = TextEditingController(text: _draftReport?.location);
-    final otherCategory = TextEditingController();
-
-    final draftCategory = _draftReport?.category ?? _selectCategoryValue;
-    String category = _dropdownValueFor(draftCategory);
-    if (category == _otherCategoryValue &&
-        draftCategory != _otherCategoryValue) {
-      otherCategory.text = draftCategory;
-    }
-    TimeOfDay timeLocated = _draftReport != null
-        ? TimeOfDay.fromDateTime(_draftReport!.dateTime)
-        : TimeOfDay.now();
-    DateTime dateLocated = _draftReport?.dateTime ?? DateTime.now();
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: StatefulBuilder(
-          builder: (_, setModalState) => SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                _modalHeader(
-                  'Create ${widget.type} Item Report',
-                  () => _confirmDialog(
-                    'Exit without uploading this item?',
-                    _discardDraft,
-                  ),
-                ),
-                _imageUploadArea(setModalState),
-                _requiredLabel('Item Name'),
-                _roundedField(name),
-                Row(
-                  children: [
-                    Expanded(child: _roundedField(brand, label: 'Brand')),
-                    const SizedBox(width: 8),
-                    Expanded(child: _roundedField(color, label: 'Color')),
-                  ],
-                ),
-                _requiredLabel('Category'),
-                DropdownButtonFormField<String>(
-                  initialValue: _dropdownValueFor(category),
-                  decoration: _inputDecoration(),
-                  items: [
-                    const DropdownMenuItem(
-                      value: _selectCategoryValue,
-                      child: Text('Select category'),
-                    ),
-                    ..._categories
-                        .map(
-                          (item) =>
-                              DropdownMenuItem(value: item, child: Text(item)),
-                        )
-                        .where((item) => item.value != _otherCategoryValue),
-                    const DropdownMenuItem(
-                      value: _otherCategoryValue,
-                      child: Text('Others'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setModalState(() {
-                      category = value;
-                      if (value != _otherCategoryValue) {
-                        otherCategory.clear();
-                      }
-                    });
-                  },
-                ),
-                if (category == _otherCategoryValue) ...[
-                  _requiredLabel('Specify Category'),
-                  _roundedField(otherCategory, label: 'Category name'),
-                ],
-                _fieldLabel('Additional Description'),
-                _roundedField(description, maxLines: 3),
-                _requiredLabel(
-                  widget.type == 'Lost' ? 'Last place located' : 'Found at',
-                ),
-                _roundedField(location),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _timeButton(
-                        timeLocated,
-                        (value) => setModalState(() => timeLocated = value),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _dateButton(
-                        dateLocated,
-                        (value) => setModalState(() => dateLocated = value),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => _confirmDialog(
-                          'Cancel and discard this item?',
-                          _discardDraft,
-                        ),
-                        child: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFE000),
-                          foregroundColor: Colors.black,
-                        ),
-                        onPressed: () {
-                          final manualCategory = otherCategory.text.trim();
-                          final selectedCategory =
-                              category == _otherCategoryValue
-                              ? manualCategory
-                              : category;
-
-                          if (name.text.trim().isEmpty ||
-                              category == _selectCategoryValue ||
-                              selectedCategory.isEmpty ||
-                              location.text.trim().isEmpty) {
-                            _infoDialog('Please fill in all required fields.');
-                            return;
-                          }
-
-                          final selectedDateTime = DateTime(
-                            dateLocated.year,
-                            dateLocated.month,
-                            dateLocated.day,
-                            timeLocated.hour,
-                            timeLocated.minute,
-                          );
-
-                          _draftReport = ItemReport(
-                            id:
-                                _draftReport?.id ??
-                                DateTime.now().millisecondsSinceEpoch
-                                    .toString(),
-                            type: widget.type,
-                            name: name.text.trim(),
-                            brand: brand.text.trim(),
-                            color: color.text.trim(),
-                            category: selectedCategory,
-                            description: description.text.trim(),
-                            location: location.text.trim(),
-                            dateTime: selectedDateTime,
-                            imagePaths: _draftImages
-                                .map((e) => e.path)
-                                .toList(),
-                          );
-
-                          Navigator.pop(context);
-                          _openReviewModal();
-                        },
-                        child: const Text('Next'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+  void _openUploadItemModal() async {
+    final result = await Navigator.push<UploadResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UploadItemScreen(
+          type: widget.type,
+          draftReport: _draftReport,
+          draftImages: _draftImages,
+          categories: _categories,
+          categoryIdsByName: _categoryIdsByName,
         ),
       ),
     );
+
+    if (result == null || !mounted) return;
+
+    _draftReport = result.report;
+    _draftImages
+      ..clear()
+      ..addAll(result.images);
+
+    _openReviewModal();
   }
 
-  void _openReviewModal() {
+  void _openReviewModal() async {
     final report = _draftReport;
     if (report == null) return;
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: Padding(
-          padding: const EdgeInsets.all(25),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _modalHeader(
-                'Review Your ${report.type} Item Report',
-                () => _confirmDialog(
-                  'Exit without submitting this report?',
-                  _discardDraft,
-                ),
-              ),
-              if (_draftImages.isNotEmpty)
-                SizedBox(
-                  height: 120,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _draftImages.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(width: 8),
-                    itemBuilder: (_, index) => ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        _draftImages[index],
-                        width: 120,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 12),
-              _reviewRow('Item Name:', report.name),
-              _reviewRow('Category:', report.category),
-              _reviewRow('Brand:', report.brand),
-              _reviewRow('Color:', report.color),
-              _reviewRow('Description:', report.description),
-              _reviewRow('Location:', report.location),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _openUploadItemModal();
-                      },
-                      child: const Text('Edit Details'),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFE000),
-                        foregroundColor: Colors.black,
-                      ),
-                      onPressed: () =>
-                          _confirmDialog('Confirm and submit this item?', () {
-                            Navigator.pop(context);
-                            _submitReport(report);
-                          }),
-                      child: _isSubmitting
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Confirm & Submit'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+    final action = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _ReviewItemScreen(
+          report: report,
+          images: _draftImages,
         ),
       ),
     );
+
+    if (!mounted || action == null) return;
+
+    if (action == 'edit') {
+      _openUploadItemModal();
+    } else if (action == 'submit') {
+      _submitReport(report);
+    }
   }
 
   Future<void> _submitReport(ItemReport report) async {
@@ -662,7 +484,51 @@ class _InventoryScreenState extends State<InventoryScreen> {
       return;
     }
 
+    developer.log('[InventoryScreen] _submitReport START (type=${widget.type}, name=${report.name})', name: 'LookFor');
     setState(() => _isSubmitting = true);
+
+    // Show non-dismissible loading overlay
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.15),
+                  blurRadius: 20,
+                ),
+              ],
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  color: Color(0xFF005BAB),
+                ),
+                SizedBox(height: 18),
+                Text(
+                  'Uploading your report...',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF333333),
+                    decoration: TextDecoration.none,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
     final submittedImagePaths = _draftImages
         .map((image) => image.path)
         .toList();
@@ -676,8 +542,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
       final timeFound = _formatApiTime(report.dateTime);
       final categoryId = _categoryIdsByName[report.category];
 
+      developer.log('[InventoryScreen] Uploading: itemName=${report.name}, category=${report.category}, categoryId=$categoryId, images=${_draftImages.length}', name: 'LookFor');
+
       Map<String, dynamic> response;
       if (widget.type == 'Found') {
+        developer.log('[InventoryScreen] Calling apiClient.reportFoundItem...', name: 'LookFor');
         response = await apiClient.reportFoundItem(
           itemName: report.name,
           category: report.category,
@@ -693,6 +562,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           referenceImage2: _draftImages.length > 2 ? _draftImages[2] : null,
         );
       } else {
+        developer.log('[InventoryScreen] Calling apiClient.reportLostItem...', name: 'LookFor');
         response = await apiClient.reportLostItem(
           itemName: report.name,
           category: report.category,
@@ -708,7 +578,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
         );
       }
 
+      developer.log('[InventoryScreen] Upload API response: $response', name: 'LookFor');
+
       final savedReportId = _readReportId(response);
+      developer.log('[InventoryScreen] Saved report ID: $savedReportId', name: 'LookFor');
+      
       final savedReport = savedReportId == null
           ? optimisticReport
           : optimisticReport.copyWith(id: savedReportId);
@@ -728,6 +602,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
       }
 
       _clearDraft();
+
+      // Dismiss loading overlay
+      if (mounted) Navigator.pop(context);
 
       if (!mounted) return;
       if (widget.type == 'Lost') {
@@ -752,14 +629,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
         _showFoundReportSubmittedDialog();
       }
 
+      developer.log('[InventoryScreen] Submit complete, reloading reports...', name: 'LookFor');
       await _loadReports();
-    } catch (e) {
+    } catch (e, stackTrace) {
+      developer.log('[InventoryScreen] _submitReport FAILED: $e', name: 'LookFor', error: e, stackTrace: stackTrace);
+      // Dismiss loading overlay
+      if (mounted) Navigator.pop(context);
       if (!mounted) return;
       _infoDialog('Upload failed: $e');
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
       }
+      developer.log('[InventoryScreen] _submitReport END', name: 'LookFor');
     }
   }
 
@@ -841,50 +723,69 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView.builder(
+                  child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.all(8),
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemCount:
                         _draftImages.length +
                         (_draftImages.length < _maxImages ? 1 : 0),
                     itemBuilder: (_, index) {
                       if (index == _draftImages.length) {
-                        return IconButton(
-                          icon: const Icon(Icons.add),
-                          onPressed: () =>
-                              _showFoundImageSourceSheet(setModalState),
+                        return Container(
+                          width: 100,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFFB7C7DA)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: IconButton(
+                            icon: const Icon(Icons.add, color: Color(0xFF005BAB)),
+                            onPressed: () =>
+                                _showFoundImageSourceSheet(setModalState),
+                          ),
                         );
                       }
 
-                      return Stack(
-                        children: [
-                          Image.file(
-                            _draftImages[index],
-                            width: 120,
-                            fit: BoxFit.cover,
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: SizedBox(
+                          width: 100,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.file(
+                                _draftImages[index],
+                                width: 100,
+                                height: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                              Positioned(
+                                right: 0,
+                                top: 0,
+                                bottom: 0,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _imgBtn(
+                                      Icons.visibility,
+                                      () => _viewImage(_draftImages[index]),
+                                    ),
+                                    _imgBtn(
+                                      Icons.edit,
+                                      () => _replaceImage(index, setModalState),
+                                    ),
+                                    _imgBtn(
+                                      Icons.delete,
+                                      () => setModalState(
+                                        () => _draftImages.removeAt(index),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          Positioned(
-                            right: 0,
-                            child: Column(
-                              children: [
-                                _imgBtn(
-                                  Icons.visibility,
-                                  () => _viewImage(_draftImages[index]),
-                                ),
-                                _imgBtn(
-                                  Icons.edit,
-                                  () => _replaceImage(index, setModalState),
-                                ),
-                                _imgBtn(
-                                  Icons.delete,
-                                  () => setModalState(
-                                    () => _draftImages.removeAt(index),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                        ),
                       );
                     },
                   ),
@@ -1830,5 +1731,163 @@ class _ReportImageWithFallbackState extends State<_ReportImageWithFallback> {
     return const Center(
       child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
     );
+  }
+}
+
+class _ReviewItemScreen extends StatelessWidget {
+  final ItemReport report;
+  final List<File> images;
+
+  const _ReviewItemScreen({
+    required this.report,
+    required this.images,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmExit(context);
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          title: Text('Review Your ${report.type} Item Report'),
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => _confirmExit(context),
+          ),
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Image preview
+              if (images.isNotEmpty)
+                SizedBox(
+                  height: 180,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: images.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, index) => ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(
+                        images[index],
+                        width: 180,
+                        height: 180,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              _detailRow('Item Name', report.name),
+              _detailRow('Category', report.category),
+              _detailRow('Brand', report.brand.isEmpty ? 'Not specified' : report.brand),
+              _detailRow('Color', report.color.isEmpty ? 'Not specified' : report.color),
+              _detailRow('Description', report.description.isEmpty ? 'None' : report.description),
+              _detailRow('Location', report.location),
+              _detailRow('Date & Time', _formatDateTime(report.dateTime)),
+
+              const SizedBox(height: 32),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context, 'edit'),
+                      child: const Text('Edit Details'),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFE000),
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () => _confirmSubmit(context),
+                      child: const Text('Submit'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF64748B),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDateTime(DateTime dt) {
+    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${dt.month}/${dt.day}/${dt.year} at $hour:$minute $period';
+  }
+
+  void _confirmExit(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm'),
+        content: const Text('Exit without submitting this report?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFFCC00),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () {
+              Navigator.pop(context); // close dialog
+              Navigator.pop(context); // go back, return null
+            },
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmSubmit(BuildContext context) {
+    Navigator.pop(context, 'submit');
   }
 }
